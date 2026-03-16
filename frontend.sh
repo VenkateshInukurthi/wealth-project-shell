@@ -33,7 +33,7 @@ N="\e[0m"
 #############################################
 
 mkdir -p "$LOG_DIR"
-
+mkdir -p "$EXTRACT_DIR"
 log() {
     echo -e "$1" | tee -a "$LOG_FILE"
 }
