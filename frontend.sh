@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 set -Eeuo pipefail
 
 #############################################
@@ -8,14 +7,16 @@ set -Eeuo pipefail
 
 APP_NAME="wealth-project"
 LOG_DIR="/var/log/$APP_NAME"
-TMP_DIR="/tmp/frontend"
+TMP_DIR="/tmp/$APP_NAME"
+ARTIFACT="$TMP_DIR/frontend.tar.gz"
+EXTRACT_DIR="$TMP_DIR/frontend"
 NGINX_HTML="/usr/share/nginx/html"
+
+ARTIFACT_URL="https://raw.githubusercontent.com/raghudevopsb88/wealth-project/main/artifacts/frontend.tar.gz"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 SCRIPT_NAME=$(basename "$0" .sh)
 LOG_FILE="$LOG_DIR/${SCRIPT_NAME}_${TIMESTAMP}.log"
-
-ARTIFACT_URL="https://raw.githubusercontent.com/raghudevopsb88/wealth-project/main/artifacts/frontend.tar.gz"
 
 #############################################
 # COLORS
@@ -24,12 +25,11 @@ ARTIFACT_URL="https://raw.githubusercontent.com/raghudevopsb88/wealth-project/ma
 R="\e[31m"
 G="\e[32m"
 Y="\e[33m"
-B="\e[34m"
 C="\e[36m"
 N="\e[0m"
 
 #############################################
-# PREPARE LOGGING
+# LOGGING
 #############################################
 
 mkdir -p "$LOG_DIR"
@@ -42,7 +42,7 @@ log() {
 # ERROR HANDLING
 #############################################
 
-trap 'log "${R}ERROR occurred at line $LINENO${N}"' ERR
+trap 'log "${R}Error occurred at line $LINENO${N}"' ERR
 
 #############################################
 # ROOT CHECK
@@ -50,40 +50,16 @@ trap 'log "${R}ERROR occurred at line $LINENO${N}"' ERR
 
 check_root() {
     if [[ "$EUID" -ne 0 ]]; then
-        log "${R}Please run as root${N}"
+        log "${R}Run this script as root${N}"
         exit 1
     fi
 }
 
 #############################################
-# RETRY FUNCTION
-#############################################
-
-retry() {
-    local retries=3
-    local count=0
-    local delay=5
-
-    until "$@"; do
-        exit_code=$?
-        count=$((count+1))
-
-        if [[ $count -lt $retries ]]; then
-            log "${Y}Command failed. Retrying in $delay seconds...${N}"
-            sleep $delay
-        else
-            log "${R}Command failed after $retries attempts.${N}"
-            return $exit_code
-        fi
-    done
-}
-
-#############################################
-# RUN COMMAND
+# COMMAND RUNNER
 #############################################
 
 run() {
-
     local description=$1
     shift
 
@@ -98,53 +74,64 @@ run() {
 }
 
 #############################################
-# INSTALL PACKAGES
+# INSTALL PACKAGES (IDEMPOTENT)
 #############################################
 
-install_packages() {
+install_nginx() {
+#
+#   if ! rpm -q nginx &>/dev/null; then
+        run "Disabling default nginx module" dnf module disable nginx -y
+        run "Enabling nginx 1.26 module" dnf module enable nginx:1.26 -y
+        run "Installing nginx" dnf install nginx -y
+#    else
+#        log "${Y}Nginx already installed${N}"
+#    fi
+}
 
-    run "Disabling default nginx module" \
-        dnf module disable nginx -y
+install_node() {
 
-    run "Enabling nginx 1.26 module" \
-        dnf module enable nginx:1.26 -y
-
-    run "Installing nginx" \
-        dnf install nginx -y
-
-    run "Installing NodeJS repo" \
-        bash -c "curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -"
-
-    run "Installing NodeJS" \
-        dnf install nodejs -y
+#    if ! command -v node &>/dev/null; then
+        run "Adding NodeJS repo" bash -c "curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -"
+        run "Installing NodeJS" dnf install nodejs -y
+#    else
+#        log "${Y}NodeJS already installed${N}"
+#    fi
 }
 
 #############################################
-# START SERVICES
+# SERVICE MANAGEMENT
 #############################################
 
-start_services() {
+setup_nginx_service() {
 
-    run "Enabling nginx service" \
-        systemctl enable nginx
+    if ! systemctl is-enabled nginx &>/dev/null; then
+        run "Enabling nginx service" systemctl enable nginx
+    fi
 
-    run "Starting nginx service" \
-        systemctl start nginx
+    if ! systemctl is-active nginx &>/dev/null; then
+        run "Starting nginx service" systemctl start nginx
+    fi
 }
 
 #############################################
-# DOWNLOAD APPLICATION
+# DOWNLOAD ARTIFACT
 #############################################
 
-download_artifacts() {
+download_artifact() {
 
     mkdir -p "$TMP_DIR"
 
     run "Downloading application artifact" \
-        retry curl -L -o "$TMP_DIR/frontend.tar.gz" "$ARTIFACT_URL"
+    curl -L -o "$ARTIFACT" "$ARTIFACT_URL"
 
-    run "Extracting application files" \
-        tar -xzf "$TMP_DIR/frontend.tar.gz" -C "$TMP_DIR"
+}
+
+#############################################
+# EXTRACT ARTIFACT
+#############################################
+
+extract_artifact() {
+    run "Extracting artifact" tar -xzf "$ARTIFACT" -C "$TMP_DIR"
 }
 
 #############################################
@@ -153,13 +140,10 @@ download_artifacts() {
 
 build_app() {
 
-    cd "$TMP_DIR/frontend"
+    cd "$EXTRACT_DIR"
 
-    run "Installing dependencies" \
-        npm ci
-
-    run "Building application" \
-        npm run build
+    run "Installing dependencies" npm ci
+    run "Building application" npm run build
 }
 
 #############################################
@@ -168,11 +152,24 @@ build_app() {
 
 deploy_app() {
 
-    run "Cleaning nginx html directory" \
-        rm -rf "$NGINX_HTML"/*
+    if [[ ! -d "$NGINX_HTML" ]]; then
+        run "Creating nginx html directory" mkdir -p "$NGINX_HTML"
+    fi
+
+    run "Cleaning nginx html directory" rm -rf "$NGINX_HTML"/*
 
     run "Deploying application files" \
-        cp -r "$TMP_DIR/frontend/dist/"* "$NGINX_HTML/"
+    cp -r "$EXTRACT_DIR/dist/"* "$NGINX_HTML/"
+}
+
+#############################################
+# Configuring NGIN
+#############################################
+
+configure_nginx() {
+    run "Removing default configuration" rm -rf /etc/nginx/nginx.conf
+    run "Copying nginx configuration file" cp -r /opt/wealth-project-shell/nginx.conf /etc/nginx/nginx.conf
+    run "removing default.config file" rm -f /etc/nginx/conf.d/default.conf
 }
 
 #############################################
@@ -181,11 +178,8 @@ deploy_app() {
 
 validate_nginx() {
 
-    run "Validating nginx configuration" \
-        nginx -t
-
-    run "Restarting nginx" \
-        systemctl restart nginx
+    run "Testing nginx configuration" nginx -t
+    run "Restarting nginx" systemctl restart nginx
 }
 
 #############################################
@@ -194,18 +188,22 @@ validate_nginx() {
 
 main() {
 
-    log "${B}====================================${N}"
-    log "${B}Starting deployment: $APP_NAME${N}"
-    log "${B}Log file: $LOG_FILE${N}"
-    log "${B}====================================${N}"
+    log "${C}================================${N}"
+    log "${C}Starting deployment: $APP_NAME${N}"
+    log "${C}Log file: $LOG_FILE${N}"
+    log "${C}================================${N}"
 
     check_root
 
-    install_packages
-    start_services
-    download_artifacts
+    install_nginx
+    install_node
+    setup_nginx_service
+
+    download_artifact
+    extract_artifact
     build_app
     deploy_app
+    configure_nginx
     validate_nginx
 
     log "${G}Deployment completed successfully 🚀${N}"
