@@ -156,10 +156,10 @@ deploy_app() {
         run "Creating nginx html directory" mkdir -p "$NGINX_HTML"
     fi
 
-    run "Cleaning nginx html directory" rm -rf "$NGINX_HTML"/*
+    run "Cleaning nginx html directory" rm -rf ${NGINX_HTML}/*
 
     run "Deploying application files" \
-    cp -r "$EXTRACT_DIR/dist/"* "$NGINX_HTML/"
+    cp -r ${EXTRACT_DIR}/dist/* "$NGINX_HTML/"
 }
 
 #############################################
