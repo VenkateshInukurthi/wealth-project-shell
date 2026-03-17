@@ -78,24 +78,18 @@ run() {
 #############################################
 
 install_nginx() {
-#
-#   if ! rpm -q nginx &>/dev/null; then
-        run "Disabling default nginx module" dnf module disable nginx -y
-        run "Enabling nginx 1.26 module" dnf module enable nginx:1.26 -y
-        run "Installing nginx" dnf install nginx -y
-#    else
-#        log "${Y}Nginx already installed${N}"
-#    fi
+
+    run "Disabling default nginx module" dnf module disable nginx -y
+    run "Enabling nginx 1.26 module" dnf module enable nginx:1.26 -y
+    run "Installing nginx" dnf install nginx -y
+
 }
 
 install_node() {
 
-#    if ! command -v node &>/dev/null; then
-        run "Adding NodeJS repo" bash -c "curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -"
-        run "Installing NodeJS" dnf install nodejs -y
-#    else
-#        log "${Y}NodeJS already installed${N}"
-#    fi
+    run "Adding NodeJS repo" bash -c "curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -"
+    run "Installing NodeJS" dnf install nodejs -y
+
 }
 
 #############################################
@@ -131,7 +125,8 @@ download_artifact() {
 #############################################
 
 extract_artifact() {
-    run "Extracting artifact" tar -xzf "$ARTIFACT" -C "$TMP_DIR"
+    # cd "$EXTRACT_DIR"
+    run "Extracting artifact" tar -xzf "$ARTIFACT" -C "$EXTRACT_DIR"
 }
 
 #############################################
